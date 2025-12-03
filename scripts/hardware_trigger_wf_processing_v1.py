@@ -110,6 +110,8 @@ if __name__ == "__main__":
                 "hit_charge": "var * float64",
                 "hit_card": "var * int32",
                 "hit_chan": "var * int32",
+                "hit_mpmt_slot": "var * int32",
+                "hit_pmt_pos": "var * int32",
                 "hit_waveform_index": "var * int32",
                 "hit_peak_sample": "var * int32",
                 "readout_number": "int32",
@@ -183,7 +185,6 @@ if __name__ == "__main__":
                         found_hit_charge, found_hit_time, found_hit_card, found_hit_chan, hit_wf_index, hit_local_indices = do_hit_processing(wf_process,wf_process_start,wf_process_card,wf_process_chan,wf_length)
                         found_hit_mpmt_slot = wf_process_mpmt_slot[hit_wf_index]
                         found_hit_pmt_pos = wf_process_pmt_pos[hit_wf_index]
-                        found_hit_chan = waveform_channels[hit_wf_index]
                         end = time.time()
                         if iev==234: print(f"Estimated hit processing: {batch_size*(end - start):.6f} seconds")
                         

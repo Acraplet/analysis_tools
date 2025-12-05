@@ -16,7 +16,7 @@ from analysis_tools import BeamAnalysis # as bm
 tag_electron_ACT35 =  False 
 cut_line = 30 #PE
 #choose the number of events to read in, set to -1 if you want to read all events
-n_events = -1
+n_events = 10000
 
 
 #Step 1, read in the data 
@@ -66,7 +66,9 @@ filename = f"beam_analysis_output_R{run_number}_full.root"
 ana = BeamAnalysis(run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5)
 
 #Store into memory the number of events desired
-ana.open_file(n_events)
+ana.open_file(n_events, require_t5 = True)
+
+print(ana.df_all)
 
 #Step 2: Adjust the 1pe calibration: need to check the accuracy on the plots
 # which are stored in plots/PID_run{run_number}_p{run_momentum}.pdf

@@ -321,43 +321,43 @@ class BeamAnalysis:
             )
         }
         
-
+        nEvents = len(data["beamline_pmt_qdc_ids"])
         
         #Read all the entries
-        act0_l, act1_l, act2_l, act3_l, act4_l, act5_l = [], [], [], [], [], []
-        act0_r, act1_r, act2_r, act3_r, act4_r, act5_r = [], [], [], [], [], []
+        act0_l, act1_l, act2_l, act3_l, act4_l, act5_l =  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float)
+        act0_r, act1_r, act2_r, act3_r, act4_r, act5_r =  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float)
 
-        total_TOF_charge = []
+        total_TOF_charge =  np.full(nEvents, np.nan, dtype=float)
 
-        act0_time_l, act0_time_r = [], []
-        mu_tag_l, mu_tag_r = [], []
+        act0_time_l, act0_time_r =  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float)
+        mu_tag_l, mu_tag_r =  np.full(nEvents, np.nan, dtype=float),  np.full(nEvents, np.nan, dtype=float)
 
-        is_kept = []
-        is_kept_event_id = [] #keeping track of which events we want to keep
+        is_kept = np.full(nEvents, np.nan, dtype=float)
+        is_kept_event_id =  np.full(nEvents, np.nan, dtype=float) #keeping track of which events we want to keep
 
         #also save the time of flight information
-        t0_avgs  = []
-        t1_avgs  = []
-        t4_avgs  = []
-        t5_avgs  = []
-        tof_vals = []
-        t4_l_array = []
-        t4_r_array = []
-        tof_t0t4_vals = []
-        tof_t4t1_vals = []
-        tof_t0t5_vals = []
-        tof_t1t5_vals = []
-        tof_t4t5_vals = []
+        t0_avgs  =  np.full(nEvents, np.nan, dtype=float)
+        t1_avgs  =  np.full(nEvents, np.nan, dtype=float)
+        t4_avgs  =  np.full(nEvents, np.nan, dtype=float)
+        t5_avgs  =  np.full(nEvents, np.nan, dtype=float)
+        tof_vals =  np.full(nEvents, np.nan, dtype=float)
+        t4_l_array =  np.full(nEvents, np.nan, dtype=float)
+        t4_r_array =  np.full(nEvents, np.nan, dtype=float)
+        tof_t0t4_vals =  np.full(nEvents, np.nan, dtype=float)
+        tof_t4t1_vals =  np.full(nEvents, np.nan, dtype=float)
+        tof_t0t5_vals =  np.full(nEvents, np.nan, dtype=float)
+        tof_t1t5_vals =  np.full(nEvents, np.nan, dtype=float)
+        tof_t4t5_vals =  np.full(nEvents, np.nan, dtype=float)
         
-        act_eveto_sums = []
-        act_tagger_sums = []
-        event_id = []
-        ref0_times = []
-        ref1_times = []
-        evt_quality_bitmask = []
+        act_eveto_sums =  np.full(nEvents, np.nan, dtype=float)
+        act_tagger_sums =  np.full(nEvents, np.nan, dtype=float)
+        event_id =  np.full(nEvents, np.nan, dtype=float)
+        ref0_times =  np.full(nEvents, np.nan, dtype=float)
+        ref1_times =  np.full(nEvents, np.nan, dtype=float)
+        evt_quality_bitmask =  np.full(nEvents, np.nan, dtype=float)
         
         #Also save the spill number for that event
-        spill_number = []
+        spill_number =  np.full(nEvents, np.nan, dtype=float)
         
         #save the reference bitmap for event quality flags:
         self.reference_flag_map = {
@@ -526,16 +526,18 @@ class BeamAnalysis:
             # reference-time subtraction & first-hit only
             mask0 = (tdc_ids == reference_ids[0])
             mask1 = (tdc_ids == reference_ids[1])
+            missing_digitiser_times = False
             if not mask0.any() or not mask1.any():
                 keep_event = False
                 ref0 = 0
                 ref1 = 0
+                missing_digitiser_times = True
             else:
                 ref0 = tdc_times[mask0][0]
                 ref1 = tdc_times[mask1][0]
                 
-            ref0_times.append(ref0)
-            ref1_times.append(ref1)
+            ref0_times[evt_idx] = ref0
+            ref1_times[evt_idx] = ref1
 
 
             for ch, t in zip(tdc_ids, tdc_times):
@@ -591,7 +593,7 @@ class BeamAnalysis:
             #and otherwise that both hits are above threshold
             event_q_t4_missing_tdc = False
             event_q_t4_below_thres = False
-            if True: #not all(not np.isnan(corrected[ch]) for ch in t4_group):
+            if not all(not np.isnan(corrected[ch]) for ch in t4_group):
                 keep_event = False
                 event_q_t4_missing_tdc = True
                 t4 = None
@@ -643,12 +645,12 @@ class BeamAnalysis:
                     event_q_hc_hit = True
 
             #Keep all of the entries but then df is only the ones that we keep 
-            t0_avgs.append(t0)
-            t1_avgs.append(t1)
-            t4_avgs.append(t4)
-            t4_l_array.append(t4_l)
-            t4_r_array.append(t4_r)
-            t5_avgs.append(t5_earliest_time)
+            t0_avgs[evt_idx] = t0
+            t1_avgs[evt_idx] = t1
+            t4_avgs[evt_idx] = t4
+            t4_l_array[evt_idx] = t4_l
+            t4_r_array[evt_idx] = t4_r
+            t5_avgs[evt_idx] = t5_earliest_time
             
             
             tof        = None
@@ -674,43 +676,43 @@ class BeamAnalysis:
                         else None
                     )
 
-            tof_vals.append(tof)
-            tof_t0t5_vals.append(tof_t0t5)
-            tof_t1t5_vals.append(tof_t1t5)
-            tof_t0t4_vals.append(tof_t0t4)
-            tof_t4t1_vals.append(tof_t4t1)
-            tof_t4t5_vals.append(tof_t4t5)
+            tof_vals[evt_idx] = tof
+            tof_t0t5_vals[evt_idx] = tof_t0t5
+            tof_t1t5_vals[evt_idx] = tof_t1t5
+            tof_t0t4_vals[evt_idx] = tof_t0t4
+            tof_t4t1_vals[evt_idx] = tof_t4t1
+            tof_t4t5_vals[evt_idx] = tof_t4t5
                 
 
             #svae the charge 
-            act0_l.append(pe_vals[12])
-            act0_r.append(pe_vals[13])
-            act1_l.append(pe_vals[14])
-            act1_r.append(pe_vals[15])
-            act2_l.append(pe_vals[16])
-            act2_r.append(pe_vals[17])
-            act3_l.append(pe_vals[18])
-            act3_r.append(pe_vals[19])
-            act4_l.append(pe_vals[20])
-            act4_r.append(pe_vals[21])
-            act5_l.append(pe_vals[22])
-            act5_r.append(pe_vals[23])
+            act0_l[evt_idx] = pe_vals[12]
+            act0_r[evt_idx] = pe_vals[13]
+            act1_l[evt_idx] = pe_vals[14]
+            act1_r[evt_idx] = pe_vals[15]
+            act2_l[evt_idx] = pe_vals[16]
+            act2_r[evt_idx] = pe_vals[17]
+            act3_l[evt_idx] = pe_vals[18]
+            act3_r[evt_idx] = pe_vals[19]
+            act4_l[evt_idx] = pe_vals[20]
+            act4_r[evt_idx] = pe_vals[21]
+            act5_l[evt_idx] = pe_vals[22]
+            act5_r[evt_idx] = pe_vals[23]
             
             spill_id = data["spill_counter"][evt_idx]
-            spill_number.append(spill_id)
+            spill_number[evt_idx] = spill_id
 
 #             total_TOF_charge.append(qdc_dict.get(48, 0)+ qdc_dict.get(49, 0)+ qdc_dict.get(50, 0)+ qdc_dict.get(51, 0)+ qdc_dict.get(52, 0)+ qdc_dict.get(53, 0)+ qdc_dict.get(54, 0)+ qdc_dict.get(55, 0)+ qdc_dict.get(56, 0)+ qdc_dict.get(57, 0)+ qdc_dict.get(58, 0)+ qdc_dict.get(59, 0)+ qdc_dict.get(60, 0)+ qdc_dict.get(61, 0)+ qdc_dict.get(62, 0)+ qdc_dict.get(63, 0))
             
-            event_id.append(evt_idx)
+            event_id[evt_idx] = evt_idx
 
 
-            mu_tag_l.append(qdc_vals[24])        
-            mu_tag_r.append(qdc_vals[25])
+            mu_tag_l[evt_idx] = qdc_vals[24]        
+            mu_tag_r[evt_idx] = qdc_vals[25]
 
-            act0_time_l.append(corrected[12])
-            act0_time_r.append(corrected[13])
+            act0_time_l[evt_idx] = corrected[12]
+            act0_time_r[evt_idx] = corrected[13]
                 
-            is_kept.append(keep_event)
+            is_kept[evt_idx] = keep_event
 
             flags = {
                 "event_q_t0_or_t1_missing_tdc": event_q_t0_or_t1_missing_tdc,
@@ -722,7 +724,8 @@ class BeamAnalysis:
             }
             
             bitmask = write_event_quality_mask(flags, self.reference_flag_map)
-            evt_quality_bitmask.append(bitmask)
+            evt_quality_bitmask[evt_idx] = bitmask
+            
             
             
             #here we are obtaining the bitmask corresponding to this specific set of flags 
@@ -782,6 +785,7 @@ class BeamAnalysis:
             "spill_number":spill_number,
             "evt_quality_bitmask":evt_quality_bitmask,
             "qdc_failure":event_q_no_qdc_entry,
+            "missing_digitiser_times": missing_digitiser_times,
           
         }
         
@@ -1277,7 +1281,7 @@ class BeamAnalysis:
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
             ax.grid()
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
 #             return 0
             
@@ -1310,7 +1314,7 @@ class BeamAnalysis:
             ax.grid()
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             ###############################################################################
@@ -1331,7 +1335,7 @@ class BeamAnalysis:
             ax.grid()
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             ###### for my own sanity
@@ -1356,7 +1360,7 @@ class BeamAnalysis:
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
             ax.grid()
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             ##### rejection factors function of efficiency 
@@ -1390,7 +1394,7 @@ class BeamAnalysis:
             ax.grid()
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             fig, ax = plt.subplots(figsize = (8, 6))
@@ -1403,7 +1407,7 @@ class BeamAnalysis:
             ax.grid()
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             
@@ -1417,7 +1421,7 @@ class BeamAnalysis:
             ax.grid()
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c) - Pions", fontsize = 20)
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             fig, ax = plt.subplots(figsize = (8, 6))
@@ -1433,7 +1437,7 @@ class BeamAnalysis:
             ax.grid()
             
             ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c) - Muons", fontsize = 20)
-            self.pdf_global.savefig(fig)
+#             self.pdf_global.savefig(fig)
             plt.close()
             
             
@@ -3390,6 +3394,8 @@ class BeamAnalysis:
          }
         
         self.df_all = self.df_all.rename(columns=rename_map)
+        nTriggers = np.array([len(self.df_all["is_kept"]) ], dtype=np.float64)
+        self.df_all = self.df_all.drop("is_kept", axis = 1)
 
         
 
@@ -3446,9 +3452,8 @@ class BeamAnalysis:
 #             results["n_helium3"] =   np.array([sum(self.df_all["is_helium3"])], dtype=np.float64)   
 #             results["n_lithium6"] =   np.array([sum(self.df_all["is_lithium6"])], dtype=np.float64)   
 #             results["n_tritium"] =   np.array([sum(self.df_all["is_tritium"])], dtype=np.float64)   
-            results["n_triggers_kept"] =  np.array([sum(self.df_all["is_kept"])], dtype=np.float64) 
-            
-            results["n_triggers_total"] =  np.array([len(self.df_all["is_kept"]) ], dtype=np.float64)  
+
+            results["n_triggers_total"] = nTriggers  
             
             
             f["scalar_results"] = results 

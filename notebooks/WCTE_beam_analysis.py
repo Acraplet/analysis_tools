@@ -13,20 +13,20 @@ from analysis_tools import BeamAnalysis # as bm
 
 
 #choose the number of events to read in, set to -1 if you want to read all events
-n_events = 700000 #-1
+n_events = -1
 
 
 #Step 1, read in the data 
 
 #### Example 1: medium momentum negative polarity
-# run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1478, -410, 1.01, 1.06, False
+run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1478, -410, 1.01, 1.06, False
 
 ### Example 2: relatively high momentum, positive polarity
 # run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1610, 760, 1.01, 1.015, True
 
 
 ##### Example 3: relatively high momentum, positive polarity
-run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1602, 770, 1.01, 1.015, True
+# run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1602, 770, 1.01, 1.015, True
 
 ######## Example 4: relatively high momentum positive polarity
 # run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1606,780, 1.01,1.015,True

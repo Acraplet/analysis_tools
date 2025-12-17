@@ -266,7 +266,7 @@ class BeamAnalysis:
         self.n_eveto, self.n_tagger = n_eveto, n_tagger
         self.there_is_ACT5 = there_is_ACT5
         
-        self.pdf_global = PdfPages(f"plots/PID_run{run_number}_p{run_momentum}.pdf")
+        self.pdf_global = PdfPages(f"../notebooks/plots/PID_run{run_number}_p{run_momentum}.pdf")
         self.channel_mapping = {12: "ACT0-L", 13: "ACT0-R", 14: "ACT1-L", 15: "ACT1-R", 16: "ACT2-L", 17: "ACT2-R", 18: "ACT3-L", 19: "ACT3-R", 20: "ACT4-L", 21: "ACT4-R", 22: "ACT5-L", 23: "ACT5-R"}
         print("Initialised the BeamAnalysis instance")
         
@@ -311,6 +311,16 @@ class BeamAnalysis:
 
         # Access the calibration constants
         calibration = calib_constants["BeamCalibrationConstants"][0]
+        
+        calib_map = {
+            ch: (gain, ped)
+            for ch, gain, ped in zip(
+                calibration["channel_id"],
+                calibration["gain_value"],
+                calibration["pedestal_mean"]
+            )
+        }
+        
 
         
         #Read all the entries
@@ -411,8 +421,11 @@ class BeamAnalysis:
         
         t4_qdc_samples = {ch: [] for ch in t4_group}
         
+
+
         for evt_idx in range(nEvents):
-            pbar.update(1)
+            if evt_idx % 100 == 0:
+                pbar.update(100)
             
             keep_event = True
             
@@ -502,6 +515,13 @@ class BeamAnalysis:
 #                     #if we require a match then skip the event
 #                     tdc_qdc_failure_counts["events_skipped"] += 1
 #                     #continue
+
+            MAX_CH = 128  #modify the dictionary based data hadnling to array
+
+            corrected = np.full(MAX_CH, np.nan)
+            qdc_vals  = np.full(MAX_CH, np.nan)
+            pe_vals   = np.full(MAX_CH, np.nan)
+
             
             # reference-time subtraction & first-hit only
             mask0 = (tdc_ids == reference_ids[0])
@@ -517,43 +537,53 @@ class BeamAnalysis:
             ref0_times.append(ref0)
             ref1_times.append(ref1)
 
-            corrected = {}
+
             for ch, t in zip(tdc_ids, tdc_times):
                 #do not store the information for the reference PMT and do not add the time if we already have an entry for that specific channel (That should be taking care of the case where more than one TDC is recorded) 
-                if ch in reference_ids or ch in corrected:
+#                 if ch in reference_ids or ch in corrected:
+                if ch in reference_ids or not np.isnan(corrected[ch]):
 #                     if ch in corrected:
 #                         t_corr = t - (ref0 if ch < reference_ids[0] else ref1)
 #                         print(f"We have more than one TDC entry for channel {ch}, the one stored is {corrected[ch]}, the new one would be {t_corr}, we are not keeping it but make sure that the following quantity is positive: {t_corr - corrected[ch]}")
                     continue
+                if not np.isnan(corrected[ch]):
+                    continue
+        
                 reference_time = ref0 if ch <= reference_ids[0] else ref1
                 corrected[ch] = t - reference_time
             
-            qdc_dict = {}
-            tdc_dict = {}
-            pe_dict = {}
+#             qdc_dict = {}
+#             tdc_dict = {}
+#             pe_dict = {}
             for ch, q in zip(qdc_ids, qdc_charges):
-                if ch not in qdc_dict:
-                    qdc_dict[ch] = q
+                if np.isnan(qdc_vals[ch]):
+                    qdc_vals[ch] = q
 
                     if (ch in act_eveto_group) or (ch in act_tagger_group):  
                         #use mean gain and mean pedestal, find it in the calibration data base
-                        calib_index = calibration["channel_id"].index(ch)
-                        gain = calibration["gain_value"][calib_index]
-                        pedestal = calibration["pedestal_mean"][calib_index]
-                        pe_dict[ch] = (q-pedestal)/gain 
+#                         calib_index = calibration["channel_id"].index(ch)
+#                         gain = calibration["gain_value"][calib_index]
+#                         pedestal = calibration["pedestal_mean"][calib_index]
+                        gain, pedestal = calib_map[ch]
+                        pe_vals[ch] = (q-pedestal)/gain 
 
             
             event_q_t0_or_t1_missing_tdc = False
             # require all channels on T0/T1 before computing averages
-            if not all(ch in corrected for ch in t0_group+t1_group):
+#             if not all(ch in corrected for ch in t0_group+t1_group):
+            if not all(not np.isnan(corrected[ch]) for ch in t0_group):
                 keep_event = False
                 event_q_t0_or_t1_missing_tdc = True
                 t0 = None
                 t1 = None
                 
             else:
-                t0 = np.mean([corrected[ch] for ch in t0_group])
-                t1 = np.mean([corrected[ch] for ch in t1_group])
+#                 t0 = np.mean([corrected[ch] for ch in t0_group])
+                vals = [corrected[ch] for ch in t0_group]
+                t0 = sum(vals) / len(vals)
+#                 t1 = np.mean([corrected[ch] for ch in t1_group])
+                vals = [corrected[ch] for ch in t1_group]
+                t1 = sum(vals) / len(vals)
                 
 
            
@@ -561,7 +591,7 @@ class BeamAnalysis:
             #and otherwise that both hits are above threshold
             event_q_t4_missing_tdc = False
             event_q_t4_below_thres = False
-            if not all(ch in corrected for ch in t4_group):
+            if True: #not all(not np.isnan(corrected[ch]) for ch in t4_group):
                 keep_event = False
                 event_q_t4_missing_tdc = True
                 t4 = None
@@ -569,13 +599,15 @@ class BeamAnalysis:
                 t4_r = None
                 
             else:
-                t4 = np.mean([corrected[ch] for ch in t4_group])
-                t4_l = corrected[t4_group[0]]
-                t4_r = corrected[t4_group[1]]
+                vals = [corrected[ch] for ch in t4_group]
+                t4 = sum(vals) / len(vals)
+                t4_l = corrected[t4_group[0]] #if not np.isnan(corrected[t4_group[0]]) else None
+                t4_r = corrected[t4_group[1]] #if not np.isnan(corrected[t4_group[1]]) else None
                 
                 
             event_q_t4_missing_qdc = False
-            if not all(ch in qdc_dict for ch in t4_group):
+#             if not all(ch in qdc_dict for ch in t4_group):
+            if not all(not np.isnan(qdc_vals[ch]) for ch in t4_group):
                 keep_event = False
                 event_q_t4_missing_qdc = True
             
@@ -583,9 +615,12 @@ class BeamAnalysis:
 
             #compute the T5 mean time based on the bar that we have selected
             t5_bar_means = []
-            for pair in t5_total_group:
-                if all(ch in corrected for ch in pair):
-                    t5_bar_means.append(np.mean([corrected[ch] for ch in pair]))
+            for ch0, ch1 in t5_total_group:
+                v0 = corrected[ch0]
+                v1 = corrected[ch1]
+
+                if not np.isnan(v0) and not np.isnan(v1):
+                    t5_bar_means.append(0.5 * (v0 + v1))
                  
             #in case there is no pairs of t5 hits 
             event_q_t5_missing_tdc = (len(t5_bar_means) == 0)
@@ -599,9 +634,13 @@ class BeamAnalysis:
 
             #--------- HC cut ----------
             event_q_hc_hit = False
-            if (any(qdc_dict.get(ch, 0) >= hc_charge_cut for ch in hc_group)):
-                keep_event = False  # if either HC channel fired with charge ≥ threshold, skip event
-                event_q_hc_hit = True
+#             if (any(qdc_dict.get(ch, 0) >= hc_charge_cut for ch in hc_group)):
+#                 keep_event = False  # if either HC channel fired with charge ≥ threshold, skip event
+#                 event_q_hc_hit = True
+            for ch in hc_group:
+                if qdc_vals[ch] >= hc_charge_cut:
+                    keep_event = False
+                    event_q_hc_hit = True
 
             #Keep all of the entries but then df is only the ones that we keep 
             t0_avgs.append(t0)
@@ -611,60 +650,65 @@ class BeamAnalysis:
             t4_r_array.append(t4_r)
             t5_avgs.append(t5_earliest_time)
             
+            
+            tof        = None
+            tof_t0t5   = None
+            tof_t1t5   = None
+            tof_t0t4   = None
+            tof_t4t1   = None
+            tof_t4t5   = None
+
             if not event_q_t0_or_t1_missing_tdc:
-                tof_vals.append(t1 - t0)
-                if t5_earliest_time is None:
-                    tof_t0t5_vals.append(None)
-                    tof_t1t5_vals.append(None)
-                else:
-                    tof_t0t5_vals.append(t5_earliest_time-t0)
-                    tof_t1t5_vals.append(t5_earliest_time-t1)
-                                         
+                tof = t1 - t0
+
+                if t5_earliest_time is not None:
+                    tof_t0t5 = t5_earliest_time - t0
+                    tof_t1t5 = t5_earliest_time - t1
 
                 if not event_q_t4_missing_tdc:
-                    tof_t0t4_vals.append(t4 - t0)
-                    tof_t4t1_vals.append(t1 - t4)
-                    tof_t4t5_vals.append((t5_earliest_time-t1) if t5_earliest_time is not None else None)
-                else:
-                    tof_t0t4_vals.append(None)
-                    tof_t4t1_vals.append(None)
-                    tof_t4t5_vals.append(None)
-            else:
-                tof_vals.append(None)
-                tof_t0t5_vals.append(None)
-                tof_t1t5_vals.append(None)
-                tof_t0t4_vals.append(None)
-                tof_t4t1_vals.append(None)
-                tof_t4t5_vals.append(None)
+                    tof_t0t4 = t4 - t0
+                    tof_t4t1 = t1 - t4
+                    tof_t4t5 = (
+                        t5_earliest_time - t1
+                        if t5_earliest_time is not None
+                        else None
+                    )
+
+            tof_vals.append(tof)
+            tof_t0t5_vals.append(tof_t0t5)
+            tof_t1t5_vals.append(tof_t1t5)
+            tof_t0t4_vals.append(tof_t0t4)
+            tof_t4t1_vals.append(tof_t4t1)
+            tof_t4t5_vals.append(tof_t4t5)
                 
 
             #svae the charge 
-            act0_l.append(pe_dict.get(12, 0))
-            act0_r.append(pe_dict.get(13, 0))
-            act1_l.append(pe_dict.get(14, 0))
-            act1_r.append(pe_dict.get(15, 0))
-            act2_l.append(pe_dict.get(16, 0))
-            act2_r.append(pe_dict.get(17, 0))
-            act3_l.append(pe_dict.get(18, 0))
-            act3_r.append(pe_dict.get(19, 0))
-            act4_l.append(pe_dict.get(20, 0))
-            act4_r.append(pe_dict.get(21, 0))
-            act5_l.append(pe_dict.get(22, 0))
-            act5_r.append(pe_dict.get(23, 0))
+            act0_l.append(pe_vals[12])
+            act0_r.append(pe_vals[13])
+            act1_l.append(pe_vals[14])
+            act1_r.append(pe_vals[15])
+            act2_l.append(pe_vals[16])
+            act2_r.append(pe_vals[17])
+            act3_l.append(pe_vals[18])
+            act3_r.append(pe_vals[19])
+            act4_l.append(pe_vals[20])
+            act4_r.append(pe_vals[21])
+            act5_l.append(pe_vals[22])
+            act5_r.append(pe_vals[23])
             
             spill_id = data["spill_counter"][evt_idx]
             spill_number.append(spill_id)
 
-            total_TOF_charge.append(qdc_dict.get(48, 0)+ qdc_dict.get(49, 0)+ qdc_dict.get(50, 0)+ qdc_dict.get(51, 0)+ qdc_dict.get(52, 0)+ qdc_dict.get(53, 0)+ qdc_dict.get(54, 0)+ qdc_dict.get(55, 0)+ qdc_dict.get(56, 0)+ qdc_dict.get(57, 0)+ qdc_dict.get(58, 0)+ qdc_dict.get(59, 0)+ qdc_dict.get(60, 0)+ qdc_dict.get(61, 0)+ qdc_dict.get(62, 0)+ qdc_dict.get(63, 0))
+#             total_TOF_charge.append(qdc_dict.get(48, 0)+ qdc_dict.get(49, 0)+ qdc_dict.get(50, 0)+ qdc_dict.get(51, 0)+ qdc_dict.get(52, 0)+ qdc_dict.get(53, 0)+ qdc_dict.get(54, 0)+ qdc_dict.get(55, 0)+ qdc_dict.get(56, 0)+ qdc_dict.get(57, 0)+ qdc_dict.get(58, 0)+ qdc_dict.get(59, 0)+ qdc_dict.get(60, 0)+ qdc_dict.get(61, 0)+ qdc_dict.get(62, 0)+ qdc_dict.get(63, 0))
             
             event_id.append(evt_idx)
 
 
-            mu_tag_l.append(qdc_dict.get(24, 0))        
-            mu_tag_r.append(qdc_dict.get(25, 0))
+            mu_tag_l.append(qdc_vals[24])        
+            mu_tag_r.append(qdc_vals[25])
 
-            act0_time_l.append(corrected.get(12, 0))
-            act0_time_r.append(corrected.get(13, 0))
+            act0_time_l.append(corrected[12])
+            act0_time_r.append(corrected[13])
                 
             is_kept.append(keep_event)
 
@@ -678,7 +722,6 @@ class BeamAnalysis:
             }
             
             bitmask = write_event_quality_mask(flags, self.reference_flag_map)
-            
             evt_quality_bitmask.append(bitmask)
             
             
@@ -722,7 +765,7 @@ class BeamAnalysis:
             "act4_r": act4_r,
             "act5_r": act5_r,
             "event_id":event_id,
-            "total_TOF_charge":total_TOF_charge,
+#             "total_TOF_charge":total_TOF_charge,
             "act0_time_l": act0_time_l,
             "act0_time_r": act0_time_r,
             "tof": tof_vals,
@@ -744,7 +787,7 @@ class BeamAnalysis:
         
         # create DataFrame, much more robust than having many arrays 
         self.df_all = pd.DataFrame(data_dict)
-        
+
         
         #add the combined branches that can be useful
         self.df_all["mu_tag_total"] = self.df_all["mu_tag_l"] + self.df_all["mu_tag_r"]

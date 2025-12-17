@@ -9,9 +9,11 @@ import sys
 #path to analysis tools - change with where your path is, though it might just work with mine on eos
 sys.path.append("/eos/user/a/acraplet/analysis_tools/")
 from analysis_tools import BeamAnalysis # as bm
+# import cProfile
+
 
 #choose the number of events to read in, set to -1 if you want to read all events
-n_events = -1
+n_events = 700000 #-1
 
 
 #Step 1, read in the data 
@@ -59,6 +61,9 @@ filename = f"../data/beam_data_analysis/beam_analysis_R{run_number}.root"
 
 #Set up a beam analysis class 
 ana = BeamAnalysis(run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5)
+
+
+# cProfile.run("ana.open_file(n_events, require_t5 = True)", sort="cumtime")
 
 #Store into memory the number of events desired
 ana.open_file(n_events, require_t5 = True)

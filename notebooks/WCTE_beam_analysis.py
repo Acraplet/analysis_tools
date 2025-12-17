@@ -16,7 +16,7 @@ from analysis_tools import BeamAnalysis # as bm
 tag_electron_ACT35 =  False 
 cut_line = 30 #PE
 #choose the number of events to read in, set to -1 if you want to read all events
-n_events = 10000
+n_events = 20000
 
 
 #Step 1, read in the data 
@@ -25,11 +25,11 @@ n_events = 10000
 # run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1478, -410, 1.01, 1.06, False
 
 ### Example 2: relatively high momentum, positive polarity
-run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1610, 760, 1.01, 1.015, True
+# run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1610, 760, 1.01, 1.015, True
 
 
 ##### Example 3: relatively high momentum, positive polarity
-# run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1602, 770, 1.01, 1.015, True
+run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1602, 770, 1.01, 1.015, True
 
 ######## Example 4: relatively high momentum positive polarity
 # run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1606,780, 1.01,1.015,True
@@ -68,7 +68,7 @@ ana = BeamAnalysis(run_number, run_momentum, n_eveto_group, n_tagger_group, ther
 #Store into memory the number of events desired
 ana.open_file(n_events, require_t5 = True)
 
-print(ana.df_all)
+
 
 #Step 2: Adjust the 1pe calibration: need to check the accuracy on the plots
 # which are stored in plots/PID_run{run_number}_p{run_momentum}.pdf
@@ -78,6 +78,14 @@ ana.adjust_1pe_calibration()
 #We need to tag protons before any other particles to avoid double-counting
 ana.tag_protons_TOF()
 #TODO: identify protons that produce knock-on electrons
+
+#Step 1: study the beam structure
+ana.study_beam_structure()
+
+#Step X: end_analysis, necessary to cleanly close files 
+ana.end_analysis()
+
+input("wait")
 
 #Step 4: tag electrons using ACT0-2 finding the minimum in the cut line
 #If we want a tighter cut, add a coefficient of reduction of the optimal cut line (e.g. 5%) to remove more electrons (and also some more muons and pions) 
@@ -108,6 +116,11 @@ ana.plot_number_particles_per_POT()
 #of electrons to be different from L/c This has to be calibrated to give meaningful momentum 
 #estimates later on
 ana.measure_particle_TOF()
+
+### here check the TOF distributions
+ana.plot_all_TOFs()
+
+
 
 ###### Check the events that aren't tagged by ACT02 but that look electron-like in ACT35
 #Useful for beam analyses, it is useful to already have computed the TOF to help PID, esp. at low momentum 

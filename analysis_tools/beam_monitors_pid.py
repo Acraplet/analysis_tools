@@ -70,6 +70,55 @@ def make_blocks(idx: np.ndarray, max_block: int):
     return blocks
 
 
+def make_flag_map(flags):
+    """
+    Build a deterministic mapping from flag name -> bit index (0..).
+    Uses sorted order of flag names so mapping is reproducible.
+    """
+    return {name: idx for idx, name in enumerate(sorted(flags))}
+
+def write_event_quality_mask(flag_dict,
+                             flag_map):
+    """
+    Pack flags into an integer bitmask.
+    
+    Parameters
+    - flag_dict: mapping of flag name -> truthy/falsey value (bool, 0/1, etc.)
+    - flag_map: optional mapping flag name -> bit index (int).
+                If None, a deterministic mapping from sorted(flag_dict.keys()) is used.
+                
+    Returns
+    - mask: int where bit i (value 2**i) is set when the corresponding flag is truthy.
+    """
+    if flag_map is None:
+        flag_map = make_flag_map(flag_dict.keys())
+
+    mask = 0
+    for flag_name, bit_idx in flag_map.items():
+        if flag_name not in flag_dict:
+            # Missing flags are treated as False (not set). Change if you want an error.
+            continue
+        if bool(flag_dict[flag_name]):
+            mask |= (1 << bit_idx)
+    return mask
+
+def read_event_quality_mask(mask,
+                            flag_map):
+    """
+    Unpack an integer bitmask back into a flag dictionary.
+    
+    Parameters
+    - mask: integer bitmask
+    - flag_map: mapping flag name -> bit index used when the mask was created
+    
+    Returns
+    - dict of flag name -> bool (True if that bit is set)
+    """
+    result: Dict[str, bool] = {}
+    for flag_name, bit_idx in flag_map.items():
+        result[flag_name] = bool(mask & (1 << bit_idx))
+    return result
+
 def _deduplicate_tdc_hits(ids, times):
     "Function used to remove the later TDC hits and corresponding channel ids in case there are more than one"
     seen = set()
@@ -231,6 +280,7 @@ class BeamAnalysis:
     def open_file(self, n_events = -1, require_t5 = False, first_tdc_only = True, enforce_tdc_qdc_match = True):
         '''Read in the data as a pandas dataframe, read in the TOF and the ACt information'''
         
+        self.require_t5_hit = require_t5
         
         file_path    = f"/eos/experiment/wcte/data/2025_commissioning/offline_data_vme_match/WCTE_offline_R{self.run_number}S0_VME_matched.root"
         tree_name    = "WCTEReadoutWindows"
@@ -281,6 +331,8 @@ class BeamAnalysis:
         t4_avgs  = []
         t5_avgs  = []
         tof_vals = []
+        t4_l_array = []
+        t4_r_array = []
         tof_t0t4_vals = []
         tof_t4t1_vals = []
         tof_t0t5_vals = []
@@ -292,9 +344,20 @@ class BeamAnalysis:
         event_id = []
         ref0_times = []
         ref1_times = []
+        evt_quality_bitmask = []
         
         #Also save the spill number for that event
         spill_number = []
+        
+        #save the reference bitmap for event quality flags:
+        self.reference_flag_map = {
+            "event_q_t0_or_t1_missing_tdc": 0,
+            "event_q_t4_missing_tdc": 1,
+            "event_q_t5_missing_tdc": 2,
+            "event_q_hc_hit": 3,
+            "event_q_t4_missing_qdc": 4,
+            "event_q_no_qdc_entry": 5
+        }
         
         
         
@@ -325,21 +388,21 @@ class BeamAnalysis:
             }
         )
             
-        #make a list of teh groups that are necessary to have qdc for
-        qdc_groups = [grp for grp in required_groups if grp["check_qdc"]]
-        #initialise the count of the number of requirements that have failed
-        group_requirement_failures = {grp["name"]: 0 for grp in required_groups}
-        #initialise the count of the number of PMT groups that have failed
-        qdc_failure_group_counts = {grp["name"]: 0 for grp in qdc_groups}
-        #Store the number of T4 qdc fails and HC failures
-        t4_qdc_failure_count = 0
-        hc_threshold_failure_count = 0
+#         #make a list of teh groups that are necessary to have qdc for
+#         qdc_groups = [grp for grp in required_groups if grp["check_qdc"]]
+#         #initialise the count of the number of requirements that have failed
+#         group_requirement_failures = {grp["name"]: 0 for grp in required_groups}
+#         #initialise the count of the number of PMT groups that have failed
+#         qdc_failure_group_counts = {grp["name"]: 0 for grp in qdc_groups}
+#         #Store the number of T4 qdc fails and HC failures
+#         t4_qdc_failure_count = 0
+#         hc_threshold_failure_count = 0
         
-        #Initialise the count the number of hits in each of the T5 pairs 
-        t5_hit_counts = np.zeros(len(t5_total_group), dtype=int) 
+#         #Initialise the count the number of hits in each of the T5 pairs 
+#         t5_hit_counts = np.zeros(len(t5_total_group), dtype=int) 
         
         #initialise a list that will hold which T5 group(s) are being hit
-        t5_bar_multiplicity = [] if require_t5 else None
+        t5_bar_multiplicity = [] #if require_t5 else None
         
         #Initialise the progress bar
         nEvents = len(data[branches[0]])
@@ -361,21 +424,21 @@ class BeamAnalysis:
             event_q_no_qdc_entry = (qdc_ids_evt.size == 0)
                  
                 
-            #store the qdc charges for each of the T4 PMTs for that event as a dict  
-            event_t4_values = {}
+#             #store the qdc charges for each of the T4 PMTs for that event as a dict  
+#             event_t4_values = {}
             
             
-            for ch_val, charge in zip(qdc_ids_evt, qdc_vals_evt):
-                ch = int(ch_val)
+#             for ch_val, charge in zip(qdc_ids_evt, qdc_vals_evt):
+#                 ch = int(ch_val)
                 
-                if ch in t4_qdc_samples and ch in event_t4_values:
-                    previous = event_t4_values[ch]
-                    print(f"We have another T4 entry for channel {ch}, the previous value was: {previous}, this values is {float(charge)}")
+#                 if ch in t4_qdc_samples and ch in event_t4_values:
+#                     previous = event_t4_values[ch]
+#                     print(f"We have another T4 entry for channel {ch}, the previous value was: {previous}, this values is {float(charge)}")
                 
-                if ch in t4_qdc_samples and ch not in event_t4_values:
-                    val = float(charge)
-                    t4_qdc_samples[ch].append(val)
-                    event_t4_values[ch] = val
+#                 if ch in t4_qdc_samples and ch not in event_t4_values:
+#                     val = float(charge)
+#                     t4_qdc_samples[ch].append(val)
+#                     event_t4_values[ch] = val
                 #testing, what happens if we have multiple entries corresponding to t
                
                     
@@ -387,48 +450,48 @@ class BeamAnalysis:
             qdc_charges = data["beamline_pmt_qdc_charges"][evt_idx]
             qdc_ids     = data["beamline_pmt_qdc_ids"][evt_idx]
             
-            #clean up the data to only include the first TDC hit 
-            if first_tdc_only:
-                tdc_ids, tdc_times, duplicates_removed = _deduplicate_tdc_hits(tdc_ids, tdc_times)
-                if duplicates_removed:
-                    for ch in duplicates_removed:
-                        channel_clean_event_counts[ch] += 1
+#             #clean up the data to only include the first TDC hit 
+#             if first_tdc_only:
+#                 tdc_ids, tdc_times, duplicates_removed = _deduplicate_tdc_hits(tdc_ids, tdc_times)
+#                 if duplicates_removed:
+#                     for ch in duplicates_removed:
+#                         channel_clean_event_counts[ch] += 1
                         
            
 
-            for idx_t5, pair in enumerate(t5_total_group):
-                #here we are counting the number of times that the pair is in the tdc_ids 
-                t5_hit_counts[idx_t5] += int(np.count_nonzero(np.isin(tdc_ids, pair)))
+#             for idx_t5, pair in enumerate(t5_total_group):
+#                 #here we are counting the number of times that the pair is in the tdc_ids 
+#                 t5_hit_counts[idx_t5] += int(np.count_nonzero(np.isin(tdc_ids, pair)))
                     
                     
                     
-            #removes the duplicates of the tdc and qdc entries 
-            tdc_set_full = set(int(x) for x in np.atleast_1d(tdc_ids))
-            qdc_set_full = set(int(x) for x in np.atleast_1d(qdc_ids))
+#             #removes the duplicates of the tdc and qdc entries 
+#             tdc_set_full = set(int(x) for x in np.atleast_1d(tdc_ids))
+#             qdc_set_full = set(int(x) for x in np.atleast_1d(qdc_ids))
             
             
             #here we are checking if we are passing the requirements about the number of hits in each TS counter. 
-            requirement_failed = False
-            for group in required_groups:
-                if not _tdc_requirement_met(group, tdc_set_full):
-                    group_requirement_failures[group["name"]] += 1
-                    requirement_failed = True
-#             if requirement_failed:
-#                 print(f"The requirement of the TS hits is not passed for event {evt_idx}")
-#                 continue
+#             requirement_failed = False
+#             for group in required_groups:
+#                 if not _tdc_requirement_met(group, tdc_set_full):
+#                     group_requirement_failures[group["name"]] += 1
+#                     requirement_failed = True
+# #             if requirement_failed:
+# #                 print(f"The requirement of the TS hits is not passed for event {evt_idx}")
+# #                 continue
                 
                 
-            #check if we have qdc failures in any of the T0, T1, T4
-            qdc_failure_this_event = False
-            for group in qdc_groups:
-                group_name = group["name"]
-                group_channels = group["channels"]
-                #if we have a tdc entry but not a qdc one then we have an issue
-                missing_qdc_given_tdc = any(ch in tdc_set_full and ch not in qdc_set_full for ch in group_channels)
-                if missing_qdc_given_tdc:
-                    #then we count the number of qdc fails for that specific channel
-                    qdc_failure_group_counts[group_name] += 1
-                    qdc_failure_this_event = True
+#             #check if we have qdc failures in any of the T0, T1, T4
+#             qdc_failure_this_event = False
+#             for group in qdc_groups:
+#                 group_name = group["name"]
+#                 group_channels = group["channels"]
+#                 #if we have a tdc entry but not a qdc one then we have an issue
+#                 missing_qdc_given_tdc = any(ch in tdc_set_full and ch not in qdc_set_full for ch in group_channels)
+#                 if missing_qdc_given_tdc:
+#                     #then we count the number of qdc fails for that specific channel
+#                     qdc_failure_group_counts[group_name] += 1
+#                     qdc_failure_this_event = True
                     
                     
 #Not summing this up as it slows downs the code a lot
@@ -491,6 +554,7 @@ class BeamAnalysis:
             else:
                 t0 = np.mean([corrected[ch] for ch in t0_group])
                 t1 = np.mean([corrected[ch] for ch in t1_group])
+                
 
            
             #require already that there is a hit in all t4 PMTs
@@ -501,8 +565,14 @@ class BeamAnalysis:
                 keep_event = False
                 event_q_t4_missing_tdc = True
                 t4 = None
+                t4_l = None
+                t4_r = None
+                
             else:
                 t4 = np.mean([corrected[ch] for ch in t4_group])
+                t4_l = corrected[t4_group[0]]
+                t4_r = corrected[t4_group[1]]
+                
                 
             event_q_t4_missing_qdc = False
             if not all(ch in qdc_dict for ch in t4_group):
@@ -536,13 +606,20 @@ class BeamAnalysis:
             t0_avgs.append(t0)
             t1_avgs.append(t1)
             t4_avgs.append(t4)
+            t4_l_array.append(t4_l)
+            t4_r_array.append(t4_r)
             t5_avgs.append(t5_earliest_time)
             
             if not event_q_t0_or_t1_missing_tdc:
                 tof_vals.append(t1 - t0)
-                #here we are calculating the TOF with T5
-                tof_t0t5_vals.append((t5_earliest_time-t0) if t5_earliest_time is not None else None)
-                tof_t1t5_vals.append((t5_earliest_time-t1) if t5_earliest_time is not None else None)
+                if t5_earliest_time is None:
+                    tof_t0t5_vals.append(None)
+                    tof_t1t5_vals.append(None)
+                else:
+                    tof_t0t5_vals.append(t5_earliest_time-t0)
+                    tof_t1t5_vals.append(t5_earliest_time-t1)
+                                         
+
                 if not event_q_t4_missing_tdc:
                     tof_t0t4_vals.append(t4 - t0)
                     tof_t4t1_vals.append(t1 - t4)
@@ -590,6 +667,22 @@ class BeamAnalysis:
                 
             is_kept.append(keep_event)
 
+            flags = {
+                "event_q_t0_or_t1_missing_tdc": event_q_t0_or_t1_missing_tdc,
+                "event_q_t4_missing_tdc": event_q_t4_missing_tdc,
+                "event_q_t5_missing_tdc": event_q_t5_missing_tdc,
+                "event_q_hc_hit": event_q_hc_hit,
+                "event_q_t4_missing_qdc": event_q_t4_missing_qdc,
+                "event_q_no_qdc_entry": event_q_no_qdc_entry
+            }
+            
+            bitmask = write_event_quality_mask(flags, self.reference_flag_map)
+            
+            evt_quality_bitmask.append(bitmask)
+            
+            
+            #here we are obtaining the bitmask corresponding to this specific set of flags 
+
             #End of the loop over events  
         act_arrays = [act0_l, act1_l, act2_l, act3_l, act4_l, act5_l,
                       act0_r, act1_r, act2_r, act3_r, act4_r, act5_r]
@@ -613,6 +706,8 @@ class BeamAnalysis:
             "t1_time": t1_avgs,
             "t4_time": t4_avgs,
             "t5_time": t5_avgs,
+            "t4_l": t4_l_array,
+            "t4_r": t4_r_array,
             "act0_l": act0_l,
             "act1_l": act1_l,
             "act2_l": act2_l,
@@ -641,11 +736,9 @@ class BeamAnalysis:
             "ref0_time":ref0_times,
             "ref1_time":ref1_times,
             "spill_number":spill_number,
+            "evt_quality_bitmask":evt_quality_bitmask,
           
         }
-        
-        for column, array in data_dict.items():
-            print(column, len(array))
         
         # create DataFrame, much more robust than having many arrays 
         self.df_all = pd.DataFrame(data_dict)
@@ -666,7 +759,14 @@ class BeamAnalysis:
             self.PMT_list = ["act0_l", "act0_r", "act1_l",  "act1_r", "act2_l", "act2_r", "act3_l", "act3_r", "act4_l", "act4_r"]
             self.df_all["act_tagger"] = self.df_all["act3_l"]+self.df_all["act3_r"]+self.df_all["act4_l"]+self.df_all["act4_r"]
         
-        self.df = self.df_all[self.df_all["is_kept"] == 1].copy()
+        #here make the subset sample that we are keeping for analysis:
+        if self.require_t5_hit:
+            self.df = self.df_all[self.df_all["evt_quality_bitmask"] == 0].copy()
+        else:
+            self.df = self.df_all[(self.df_all["evt_quality_bitmask"] == 0) | (self.df_all["evt_quality_bitmask"] == 4)].copy()
+            
+            
+        print(f"\n \n When T5 requirement is {self.require_t5_hit} the fraction of events kept for analysis is {len(self.df)/len(self.df_all) * 100}% \n \n")
         
         #this will be necessary for identifying events later
         self.is_kept = is_kept
@@ -675,54 +775,54 @@ class BeamAnalysis:
         self.is_kept_event_id = is_kept_event_id                          
         pbar.close()
         
-        print(f"Total weight of self.df: {self.df.memory_usage(deep=True).sum()/ (1024**2):.2f}Mb")
+#         print(f"Total weight of self.df: {self.df.memory_usage(deep=True).sum()/ (1024**2):.2f}Mb")
         
-        summary_groups = ", ".join(grp["name"] for grp in required_groups)
-        print(f"Required channel presence summary ({summary_groups}) — TDC only:")
-        if any(group_requirement_failures.values()):
-            for group in required_groups:
-                group_name = group["name"]
-                failures = group_requirement_failures[group_name]
-                percent = (failures / nEvents * 100) if nEvents else 0
-                print(f"  {group_name}: skipped {failures}/{nEvents} events ({percent:.2f}%) due to missing TDC IDs")
-        else:
-            print("  No events skipped for missing required TDC channels.")
+#         summary_groups = ", ".join(grp["name"] for grp in required_groups)
+#         print(f"Required channel presence summary ({summary_groups}) — TDC only:")
+#         if any(group_requirement_failures.values()):
+#             for group in required_groups:
+#                 group_name = group["name"]
+#                 failures = group_requirement_failures[group_name]
+#                 percent = (failures / nEvents * 100) if nEvents else 0
+#                 print(f"  {group_name}: skipped {failures}/{nEvents} events ({percent:.2f}%) due to missing TDC IDs")
+#         else:
+#             print("  No events skipped for missing required TDC channels.")
 
-        print("QDC failure summary (TDC present, missing QDC):")
-        if qdc_failure_group_counts and any(qdc_failure_group_counts.values()):
-            for group in qdc_groups:
-                group_name = group["name"]
-                failures = qdc_failure_group_counts[group_name]
-                percent = (failures / nEvents * 100) if nEvents else 0
-                print(f"  {group_name}: {failures}/{nEvents} events ({percent:.2f}%) had TDC with no QDC match")
-            total_failures = tdc_qdc_failure_counts["qdc_failure"]
-            print(f"  Total events with QDC failures: {total_failures}/{nEvents}")
-        else:
-            print("  No QDC failures detected in required channels.")
+#         print("QDC failure summary (TDC present, missing QDC):")
+#         if qdc_failure_group_counts and any(qdc_failure_group_counts.values()):
+#             for group in qdc_groups:
+#                 group_name = group["name"]
+#                 failures = qdc_failure_group_counts[group_name]
+#                 percent = (failures / nEvents * 100) if nEvents else 0
+#                 print(f"  {group_name}: {failures}/{nEvents} events ({percent:.2f}%) had TDC with no QDC match")
+#             total_failures = tdc_qdc_failure_counts["qdc_failure"]
+#             print(f"  Total events with QDC failures: {total_failures}/{nEvents}")
+#         else:
+#             print("  No QDC failures detected in required channels.")
 
-        print("T4 QDC threshold summary:")
-        if t4_qdc_failure_count:
-            percent = (t4_qdc_failure_count / nEvents * 100) if nEvents else 0
-            print(f"  Failed T4 QDC cut: {t4_qdc_failure_count}/{nEvents} events ({percent:.2f}%) removed.")
-        else:
-            print("  All events passed the T4 QDC cut.")
+#         print("T4 QDC threshold summary:")
+#         if t4_qdc_failure_count:
+#             percent = (t4_qdc_failure_count / nEvents * 100) if nEvents else 0
+#             print(f"  Failed T4 QDC cut: {t4_qdc_failure_count}/{nEvents} events ({percent:.2f}%) removed.")
+#         else:
+#             print("  All events passed the T4 QDC cut.")
 
-        print("HC charge veto summary:")
-        if hc_threshold_failure_count:
-            percent = (hc_threshold_failure_count / nEvents * 100) if nEvents else 0
-            print(f"  Failed HC charge cut: {hc_threshold_failure_count}/{nEvents} events ({percent:.2f}%) removed.")
-        else:
-            print("  All events passed the HC charge cut.")
+#         print("HC charge veto summary:")
+#         if hc_threshold_failure_count:
+#             percent = (hc_threshold_failure_count / nEvents * 100) if nEvents else 0
+#             print(f"  Failed HC charge cut: {hc_threshold_failure_count}/{nEvents} events ({percent:.2f}%) removed.")
+#         else:
+#             print("  All events passed the HC charge cut.")
 
-        if first_tdc_only:
-            print("TDC duplicate-removal summary:")
-            if channel_clean_event_counts:
-                for ch in sorted(channel_clean_event_counts):
-                    events_cleaned = channel_clean_event_counts[ch]
-                    percent = (events_cleaned / nEvents * 100) if nEvents else 0
-                    print(f"  Channel {ch}: {events_cleaned}/{nEvents} events ({percent:.2f}%) had repeated TDC IDs cleaned")
-            else:
-                print("No duplicate TDC hits detected.")
+#         if first_tdc_only:
+#             print("TDC duplicate-removal summary:")
+#             if channel_clean_event_counts:
+#                 for ch in sorted(channel_clean_event_counts):
+#                     events_cleaned = channel_clean_event_counts[ch]
+#                     percent = (events_cleaned / nEvents * 100) if nEvents else 0
+#                     print(f"  Channel {ch}: {events_cleaned}/{nEvents} events ({percent:.2f}%) had repeated TDC IDs cleaned")
+#             else:
+#                 print("No duplicate TDC hits detected.")
         
         
     def adjust_1pe_calibration(self):
@@ -2840,15 +2940,6 @@ class BeamAnalysis:
         plt.close()
         
         
-        
-
-        
-        
-        
-        
-            
-            
-            
             
     def measure_particle_TOF(self):
         '''Measure the TOF for each of the particles accounting for any offsets between the electron TOF and L/c'''
@@ -3033,11 +3124,7 @@ class BeamAnalysis:
             "deuteron": popt_D[2] if sum(self.df["is_deuteron"])>100 else 0,
             "helium3": popt_He3[2] if sum(self.df["is_helium3"])>20 else 0,
             "tritium": popt_tritium[2] if sum(self.df["is_tritium"])>20 else 0,
-            "lithium6": popt_Li6[2] if sum(self.df["is_lithium6"])>20 else 0,
-            
-            
-            
-            
+            "lithium6": popt_Li6[2] if sum(self.df["is_lithium6"])>20 else 0,    
         }
         
         self.particle_tof_eom = {
@@ -3053,6 +3140,29 @@ class BeamAnalysis:
             
             
         }
+        
+        
+    def plot_all_TOFs(self):
+        "quick function to plot all the TOFs for checking"
+        bins = [np.linspace(10, 55, 150), np.linspace(10, 55, 150), np.linspace(-40, 40, 150), np.linspace(20, 70, 150), np.linspace(10, 55, 150), np.linspace(10, 55, 150), np.linspace(-220, 220, 300), np.linspace(-220, 220, 300), np.linspace(-220, 220, 300), np.linspace(-220, 220, 300)]
+        tof_var = ["tof", "tof_t0t4", "tof_t4t1", "tof_t0t5", "tof_t1t5", "tof_t4t5", "t0_time", "t1_time", "t4_time", "t5_time"]
+        tof_names = ["T0-T1","T0-T4", "T4-T1", "T0-T5", "T1-T5", "T4-T5", "T0", "T1", "T4", "T5"]
+        
+        for i in range(len(tof_var)):
+            fig, ax = plt.subplots(figsize = (8, 6))
+            for population in ["is_electron", "is_muon", "is_pion", "is_proton"]:
+                ax.hist(self.df[self.df[population]==1][tof_var[i]], bins = bins[i], label = f"{population} total: {sum(self.df[population])}", histtype = "step")
+
+            ax.set_ylabel("Number of events", fontsize = 18)
+            ax.set_xlabel("Time of flight (ns)", fontsize = 18)
+            ax.legend(fontsize = 10)
+            ax.grid()
+            ax.set_yscale("log")
+            ax.set_ylim(0.5, 5e5)
+            ax.set_title(f"Run {self.run_number} {tof_names[i]} Time ({self.run_momentum} MeV/c) \n require T5 = {self.require_t5_hit}", fontsize = 20)
+            self.pdf_global.savefig(fig)
+            
+        
         
         
     def plot_TOF_charge_distribution(self):
@@ -3478,9 +3588,284 @@ class BeamAnalysis:
         ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)", fontsize = 20)
         self.pdf_global.savefig(fig)
         plt.close()
-                  
-                  
         
+        
+    def study_beam_structure(self):
+        """This function studies the timing difference between consecutive triggers to estimate the probability that a given bunch holds a particle and also study the temporal structure of the beam. It will be useful to correlate this with the scalar information (at some point)"""
+        
+        #step 1: make a histogram of the timings for a given spill
+        #work with all the data so we are not biased by our selection (though we will have for sure the online electron veto impact to keep in mind)  
+        
+        spill_number = 6
+        df_with_diffs = self.df.copy()
+        #self.df_all[self.df_all["spill_number"]==spill_number].copy() #.copy()
+        df_with_diffs["ref0_dt"] = df_with_diffs.groupby("spill_number")["ref0_time"].transform(lambda x: x - x.min())
+        df_with_diffs["ref1_dt"] = df_with_diffs.groupby("spill_number")["ref1_time"].transform(lambda x: x - x.min())
+
+
+        
+        bins = np.linspace (0, 30, 30)
+        
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        ax.hist(df_with_diffs["ref0_dt"], bins = bins, color = "blue", label = "ref0", histtype="step")
+        ax.hist(df_with_diffs["ref1_dt"], bins = bins, color = "black", label = "ref1", histtype="step")
+        
+        ax.set_xlabel("Time since begining of spill", fontsize=20)
+        ax.set_ylabel("Number of triggers", fontsize=20)
+        
+        ax.legend(fontsize=20)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c) \n Ref times distribution, total number of spills {max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        
+        df_with_diffs["t0_times"] = df_with_diffs.groupby("spill_number")["t0_time"].transform(lambda x: x - x.min())
+        df_with_diffs["t1_times"] = df_with_diffs.groupby("spill_number")["t1_time"].transform(lambda x: x - x.min())
+        df_with_diffs["t5_times"] = df_with_diffs.groupby("spill_number")["t5_time"].transform(lambda x: x - x.min())
+        df_with_diffs["t4_times"] = df_with_diffs.groupby("spill_number")["t4_time"].transform(lambda x: x - x.min())
+
+
+        
+        bins = np.linspace (-210, -140, 60)
+        
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        ax.hist(df_with_diffs["t0_time"], bins = bins, color = "blue", label = "T0 average times", histtype="step")
+        ax.hist(df_with_diffs["t1_time"], bins = bins, color = "black", label = "T1 average times", histtype="step")
+        ax.hist(df_with_diffs["t4_time"], bins = bins, color = "green", label = "T4 average times", histtype="step")
+        ax.hist(df_with_diffs["t5_time"], bins = bins, color = "red", label = "T5 average times", histtype="step")
+        
+        ax.set_xlabel("Recorded time", fontsize=20)
+        ax.set_ylabel("Number of triggers", fontsize=20)
+        
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c) \nTS times distribution, Looking at spill {spill_number}") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        ax.plot(df_with_diffs["t0_time"], marker = "x", color = "blue", label = "T0 average times", linestyle = "")
+        ax.plot(df_with_diffs["t1_time"], marker = "x", color = "black", label = "T1 average times", linestyle = "")
+        ax.plot(df_with_diffs["t4_time"], marker = "x", color = "green", label = "T4 average times", linestyle = "")
+        ax.plot(df_with_diffs["t5_time"], marker = "x", color = "red", label = "T5 average times", linestyle = "")
+        
+        ax.set_ylim(-210, -120)
+        
+        
+        ax.set_ylabel("Time of events in given spill", fontsize=20)
+        ax.set_xlabel("Trigger index within spill", fontsize=20)
+        
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c) \nTS times distribution, Looking at spill {spill_number}") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        fig, axs = plt.subplots(2, 2, figsize = (18, 16))
+        y = np.arange(len(df_with_diffs))
+        y_bins = np.linspace(0, len(df_with_diffs), 50)
+        
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c) \nTS times distribution, Looking at spill {spill_number}") 
+        
+        bins_2d = [y_bins, np.linspace(-220, -140, 80)]
+        axs[0,0].hist2d(y, df_with_diffs["t0_time"], bins = bins_2d, label = "T0 average times")
+        axs[0,0].set_title("T0", fontsize = 20)
+        axs[0,1].hist2d(y, df_with_diffs["t1_time"], bins = bins_2d,  label = "T1 average times")
+        axs[0,1].set_title("T1", fontsize = 20)
+        
+        axs[1,0].hist2d(y, df_with_diffs["t4_time"], bins = bins_2d,  label = "T4 average times")
+        axs[1,0].set_title("T4", fontsize = 20)
+        
+        axs[1,1].hist2d(y, df_with_diffs["t5_time"], bins = bins_2d,  label = "T5 average times")
+        axs[1,1].set_title("T5", fontsize = 20)
+        
+        
+        for axes in axs:
+            for ax in axes:
+#                 ax.set_ylim(-210, -120)        
+                ax.set_ylabel("Time of events in given spill", fontsize=10)
+                ax.set_xlabel("Trigger index within spill", fontsize=10)
+#                 ax.legend(fontsize=10)
+                #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        
+        
+        
+        df_p = self.df[self.df["is_proton"]==True].copy()#
+        
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        for s in [5, 6,7]:
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+            ax.plot(df_p[df_p["spill_number"]==s]["t4_time"], df_p[df_p["spill_number"]==s]["tof_t0t4"], marker = "x", label = f"T0-T4 TOF vs T4 time spill {s}", linestyle = "")
+        
+
+        
+        ax.set_ylabel("T0-T4 TOF", fontsize=20)
+        ax.set_xlabel("T4 time of event", fontsize=20)
+        ax.set_xlim(-200,-125)
+        ax.set_ylim(25, 50)
+        ax.legend(fontsize=16)
+        
+        self.pdf_global.savefig(fig)
+        
+        plt.close()
+        
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        for s in [5, 6,7]:
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+            ax.plot(df_p[df_p["spill_number"]==s]["ref0_time"], df_p[df_p["spill_number"]==s]["tof_t0t4"], marker = "x", label = f"T0-T4 TOF vs ref0 time spill {s}", linestyle = "")
+        
+
+        
+        ax.set_ylabel("T0-T4 TOF", fontsize=20)
+        ax.set_xlabel("ref0 time of event", fontsize=20)
+#         ax.set_xlim(-200,-125)
+        ax.set_ylim(25, 50)
+        ax.legend(fontsize=16)
+        
+        self.pdf_global.savefig(fig)
+        
+        plt.close()
+        
+        
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        
+        df_p = self.df[self.df["is_proton"]==True].copy()
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+        ax.plot(df_p["t0_time"], df_p["tof_t0t4"], marker = "x", color = "red", label = "T0-T4 TOF vs T0 time", linestyle = "")
+        ax.plot(df_p["t5_time"], df_p["tof_t0t5"], marker = "x", color = "black", label = "T0-T5 TOF vs T5 time", linestyle = "")
+        ax.plot(df_p["t4_time"], df_p["tof_t4t5"], marker = "x", color = "green", label = "T4-T5 TOF vs T4 time", linestyle = "")
+        
+#         ax.plot(df_with_diffs["t0_time"], marker = "x", color = "blue", label = "T0 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t1_time"], marker = "x", color = "black", label = "T1 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t4_time"], marker = "x", color = "green", label = "T4 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t5_time"], marker = "x", color = "red", label = "T5 average times", linestyle = "")
+        
+        ax.set_ylabel("T0-T4 TOF", fontsize=20)
+        ax.set_xlabel("TS time of event", fontsize=20)
+#         ax.set_xlim(-200,-125)
+#         ax.set_ylim(25, 50)
+        ax.set_xlim(-250,-125)
+        ax.set_ylim(20, 60)
+        
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        
+        bins = np.linspace (0, 60, 60)
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+        ax.hist(df_p["tof_t0t4"],  bins = bins, color = "blue", label = "T0-T4 TOF (protons)", histtype = "step")
+        ax.hist(df_p["tof"], bins = bins, color = "red", label = "T0-T1 TOF(protons)", histtype = "step")
+        ax.hist(df_p["tof_t4t5"]+25, bins = bins, color = "green", label = "T4-T5 TOF(protons)", histtype = "step")
+        ax.hist(df_p["tof_t0t5"]-30, bins = bins, color = "black", label = "T0-T5 TOF(protons)", histtype = "step")
+        ax.hist(df_p["tof_t4t1"]+20, bins = bins, color = "magenta", label = "T1-T4 TOF(protons)", histtype = "step")
+        
+#         ax.plot(df_with_diffs["t0_time"], marker = "x", color = "blue", label = "T0 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t1_time"], marker = "x", color = "black", label = "T1 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t4_time"], marker = "x", color = "green", label = "T4 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t5_time"], marker = "x", color = "red", label = "T5 average times", linestyle = "")
+        
+        ax.set_xlabel("TOF", fontsize=20)
+        ax.set_ylabel("Number of events", fontsize=20)
+        
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+        ax.plot(df_p["t0_time"], df_p["t1_time"], marker = "x", color = "red", label = "T1 vs T0 time", linestyle = "")
+        ax.plot(df_p["t4_time"], df_p["t0_time"], marker = "x", color = "black", label = "T4 vs T0 time", linestyle = "")
+        ax.plot(df_p["t1_time"], df_p["t4_time"], marker = "x", color = "green", label = "T1 vs T4 time", linestyle = "")
+        
+#         ax.plot(df_with_diffs["t0_time"], marker = "x", color = "blue", label = "T0 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t1_time"], marker = "x", color = "black", label = "T1 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t4_time"], marker = "x", color = "green", label = "T4 average times", linestyle = "")
+#         ax.plot(df_with_diffs["t5_time"], marker = "x", color = "red", label = "T5 average times", linestyle = "")
+        
+        ax.set_ylabel("TS time", fontsize=20)
+        ax.set_xlabel("TS time", fontsize=20)
+        ax.set_xlim(-220,-150)
+        ax.set_ylim(-220, -150)
+#         ax.set_xlim(-250,-125)
+#         ax.set_ylim(20, 60)
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        #How the T4 tof as a function of the difference between T4 l and T4 r
+        fig, ax = plt.subplots(figsize = (8, 6))
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+        ax.plot(df_p["t4_l"]-df_p["t4_r"], df_p["tof_t0t4"], marker = "x", color = "red", label = "T0-T4 TOF vs T4L-T4R time", linestyle = "")
+        ax.plot(df_p["t4_l"]-df_p["t4_r"], df_p["tof_t4t1"]+20, marker = "x", color = "black", label = "T1-T4 TOF vs T4L-T4R time", linestyle = "")
+
+        
+        
+        ax.set_ylabel("TOF", fontsize=20)
+        ax.set_xlabel("T4L-T4R", fontsize=20)
+        ax.set_xlim(-15,15)
+        ax.set_ylim(0,50)
+#         ax.set_ylim(-220, -150)
+#         ax.set_xlim(-250,-125)
+#         ax.set_ylim(20, 60)
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+         #How the T4 tof as a function of the difference between T4 l and T4 r
+        fig, ax = plt.subplots(figsize = (8, 6))
+        bins = np.linspace(-15, 15, 30)
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+        ax.hist(df_p["t4_l"]-df_p["t4_r"], color = "red", bins = bins, label = "T0-T4 TOF vs T4L-T4R time", histtype = "step")              
+        
+        ax.set_ylabel("Number of events", fontsize=20)
+        ax.set_xlabel("T4L-T4R", fontsize=20)
+        ax.set_xlim(-15,15)
+#         ax.set_ylim(0,50)
+#         ax.set_ylim(-220, -150)
+#         ax.set_xlim(-250,-125)
+#         ax.set_ylim(20, 60)
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
+        
+        print("ok")
+        
+        fig, ax = plt.subplots(figsize = (8, 6))
+        #I want to plot the tof of protons as a function of the registered T4 hit 
+        ax.scatter(df_p["t4_l"]+40, df_p["t4_l"]-df_p["t0_time"], marker = "x", color = "red", label = "T4L-T0 vs T4L+40ns")
+        ax.scatter(df_p["t4_r"], df_p["t4_r"]-df_p["t0_time"], marker = "x", color = "blue", label = "T4R-T0 vs T4R")
+        
+        ax.scatter(df_p["t4_l"]+20, df_p["t4_r"]-df_p["t0_time"], marker = "x", color = "green", label = "T4R-T0 vs T4L+20ns")
+        
+        ax.set_xlabel("T4 L or R", fontsize=20)
+        ax.set_ylabel("T4L-T0 or TR-T0", fontsize=20)
+        ax.set_xlim(-200,-100)
+        ax.set_ylim(0,50)
+#         ax.set_ylim(-220, -150)
+#         ax.set_xlim(-250,-125)
+#         ax.set_ylim(20, 60)
+        ax.legend(fontsize=16)
+        ax.set_title(f"Run {self.run_number} ({self.run_momentum} MeV/c)") #max(df_with_diffs["spill_number"])}")
+        self.pdf_global.savefig(fig)
+        plt.close()
         
         
         

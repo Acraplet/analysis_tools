@@ -10,13 +10,8 @@ import sys
 sys.path.append("/eos/user/a/acraplet/analysis_tools/")
 from analysis_tools import BeamAnalysis # as bm
 
-#Step 0, decide what cut to apply:
-
-#electron ACT35 cut
-tag_electron_ACT35 =  False 
-cut_line = 30 #PE
 #choose the number of events to read in, set to -1 if you want to read all events
-n_events = 20000
+n_events = -1
 
 
 #Step 1, read in the data 

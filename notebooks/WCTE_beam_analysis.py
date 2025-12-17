@@ -5,7 +5,10 @@ This code is the default way of identifying particles using the beam monitor. It
 import numpy as np
 import importlib
 #this is the file with the necessary functions for performing PID 
-import beam_monitors_pid as bm
+import sys
+#path to analysis tools - change with where your path is, though it might just work with mine on eos
+sys.path.append("/eos/user/a/acraplet/analysis_tools/")
+from analysis_tools import BeamAnalysis # as bm
 
 #Step 0, decide what cut to apply:
 
@@ -13,7 +16,7 @@ import beam_monitors_pid as bm
 tag_electron_ACT35 =  False 
 cut_line = 30 #PE
 #choose the number of events to read in, set to -1 if you want to read all events
-n_events = -1 #0000 # -1
+n_events = 20000
 
 
 #Step 1, read in the data 
@@ -26,10 +29,10 @@ n_events = -1 #0000 # -1
 
 
 ##### Example 3: relatively high momentum, positive polarity
-# run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1602, 770, 1.01, 1.015, True
+run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1602, 770, 1.01, 1.015, True
 
 ######## Example 4: relatively high momentum positive polarity
-run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1606,780, 1.01,1.015,True
+# run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1606,780, 1.01,1.015,True
 
 ###Example 5: low momentum, positive polarity 
 # run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5 = 1308,220,1.01,1.15, False
@@ -60,10 +63,12 @@ filename = f"beam_analysis_output_R{run_number}_full.root"
 
 
 #Set up a beam analysis class 
-ana = bm.BeamAnalysis(run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5)
+ana = BeamAnalysis(run_number, run_momentum, n_eveto_group, n_tagger_group, there_is_ACT5)
 
 #Store into memory the number of events desired
-ana.open_file(n_events)
+ana.open_file(n_events, require_t5 = True)
+
+
 
 #Step 2: Adjust the 1pe calibration: need to check the accuracy on the plots
 # which are stored in plots/PID_run{run_number}_p{run_momentum}.pdf
@@ -74,13 +79,19 @@ ana.adjust_1pe_calibration()
 ana.tag_protons_TOF()
 #TODO: identify protons that produce knock-on electrons
 
+#Step 1: study the beam structure
+ana.study_beam_structure()
+
+#Step X: end_analysis, necessary to cleanly close files 
+ana.end_analysis()
+
+input("wait")
+
 #Step 4: tag electrons using ACT0-2 finding the minimum in the cut line
 #If we want a tighter cut, add a coefficient of reduction of the optimal cut line (e.g. 5%) to remove more electrons (and also some more muons and pions) 
 tightening_factor = 0 #in units of percent of the cut line, how much you want to reduce the cut position to increase the purity of the muon/pion sample
 #this is interseting but not really resolving the issue of electron contamination: leave at 0% for now
 ana.tag_electrons_ACT02(tightening_factor)
-
-
 
 #instead use ACT35 to tag electrons (when depositing more than cutline PE, for now TBD by analyser)
 if tag_electron_ACT35:
@@ -95,12 +106,21 @@ ana.plot_ACT35_left_vs_right()
 #A more thorough analysis might want to remove events that are close to the cut line for a higher purity
 ana.tag_muons_pions_ACT35()
 
+# Study the number of particles produced per spill and per POT
+#TODO: move to later on in the code. 
+ana.plot_number_particles_per_POT()
+
 #Step 7: estimate the momentum for each particle from the T0-T1 TOF
 # first measure the particle TOF, make the plot
 #This corrects any offset in the TOF (e.g. from cable length) that can cause the TOF 
 #of electrons to be different from L/c This has to be calibrated to give meaningful momentum 
 #estimates later on
 ana.measure_particle_TOF()
+
+### here check the TOF distributions
+ana.plot_all_TOFs()
+
+
 
 ###### Check the events that aren't tagged by ACT02 but that look electron-like in ACT35
 #Useful for beam analyses, it is useful to already have computed the TOF to help PID, esp. at low momentum 
@@ -124,6 +144,7 @@ ana.estimate_momentum(-1.012e-2, True)
 ############################################################
 #Visually, it looks like all the particles reach the TOF
 ana.plot_TOF_charge_distribution()
+
 
 #Step X: end_analysis, necessary to cleanly close files 
 ana.end_analysis()

@@ -204,6 +204,12 @@ int main(int argc, char **argv) {
   std::vector<double> *raw_waveform_times = nullptr;
   std::vector<std::vector<double>> *raw_waveforms = nullptr;
 
+  // BEAMLINE PMT variables (from raw data, used when merge_beam is false)
+  std::vector<float> *raw_beamline_pmt_qdc_charges = nullptr;
+  std::vector<float> *raw_beamline_pmt_tdc_times = nullptr;
+  std::vector<int> *raw_beamline_pmt_qdc_ids = nullptr;
+  std::vector<int> *raw_beamline_pmt_tdc_ids = nullptr;
+
   // TRIGGER BOARD HITS AND WAVEFORMS (Output vectors)
   std::vector<int> *tb_hit_card_ids = new std::vector<int>();
   std::vector<int> *tb_hit_channel_ids = new std::vector<int>();
@@ -398,6 +404,18 @@ int main(int argc, char **argv) {
     t_raw->SetBranchAddress("pmt_waveform_times", &raw_waveform_times);
     t_raw->SetBranchAddress("pmt_waveforms", &raw_waveforms);
 
+    // Set Branches - BEAMLINE PMT (from raw data, only when not merging beam)
+    if (!merge_beam) {
+      t_raw->SetBranchAddress("beamline_pmt_qdc_charges",
+                              &raw_beamline_pmt_qdc_charges);
+      t_raw->SetBranchAddress("beamline_pmt_tdc_times",
+                              &raw_beamline_pmt_tdc_times);
+      t_raw->SetBranchAddress("beamline_pmt_qdc_ids",
+                              &raw_beamline_pmt_qdc_ids);
+      t_raw->SetBranchAddress("beamline_pmt_tdc_ids",
+                              &raw_beamline_pmt_tdc_ids);
+    }
+
     // Set Branches - CALIBRATED HITS
     t_cal->SetBranchAddress("readout_number", &cal_readout_number);
     t_cal->SetBranchAddress("nhit_pmt_calibrated_times",
@@ -560,6 +578,14 @@ int main(int argc, char **argv) {
                   &tb_waveform_channel_ids);
     t_out->Branch("trigger_board_waveform_times", &tb_waveform_times);
     t_out->Branch("trigger_board_waveforms", &tb_waveforms);
+
+    // Create Beamline PMT Output Branches (from raw data, only when not merging beam)
+    if (!merge_beam) {
+      t_out->Branch("beamline_pmt_qdc_charges", &raw_beamline_pmt_qdc_charges);
+      t_out->Branch("beamline_pmt_tdc_times", &raw_beamline_pmt_tdc_times);
+      t_out->Branch("beamline_pmt_qdc_ids", &raw_beamline_pmt_qdc_ids);
+      t_out->Branch("beamline_pmt_tdc_ids", &raw_beamline_pmt_tdc_ids);
+    }
 
     // Create vme_ prefixed Output Branches for Beam
     if (merge_beam) {
